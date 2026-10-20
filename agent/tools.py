@@ -6,6 +6,7 @@ submit_answer 는 최종 답을 구조화된 형태로 받는 종료 신호다.
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 
 import psycopg
@@ -58,6 +59,7 @@ def tool_definitions(table_names: list[str]) -> list[dict]:
             "name": "run_sql",
             "description": (
                 f"PostgreSQL SELECT 쿼리 하나를 읽기 전용 계정으로 실행하고 결과를 최대 {MAX_ROWS}행까지 돌려준다. "
+                "list_tables 의 테이블만 읽을 수 있고, 함수는 집계·윈도·조건·숫자·문자열·날짜·형 변환 함수만 쓸 수 있다. "
                 "쓰기·DDL·여러 문장은 거부되고 5초가 넘으면 취소된다. 오류가 나면 메시지를 보고 고쳐서 다시 실행한다. "
                 "행이 많을 결과는 GROUP BY·집계로 줄여서 요청한다."
             ),
@@ -145,9 +147,15 @@ class Toolbox:
         if handler is None:
             return ToolOutcome(f"알 수 없는 도구: {name}", is_error=True)
         try:
-            return handler(**args)
+            inspect.signature(handler).bind(**args)
         except TypeError as e:
             return ToolOutcome(f"도구 입력 오류: {e}", is_error=True)
+        # describe_table·list_tables 의 DB 오류(시간 초과, 끊긴 연결)도 run_sql 처럼 모델에게 도구 결과로 돌려준다.
+        # 그 밖의 예외는 하네스 버그라서 run_agent 가 실행 기록과 함께 harness_error 로 남긴다.
+        try:
+            return handler(**args)
+        except psycopg.Error as e:
+            return db_error_outcome(e)
 
     # ---------------------------------------------------------------- list_tables
     def list_tables(self) -> ToolOutcome:
@@ -206,19 +214,13 @@ class Toolbox:
     # ---------------------------------------------------------------- run_sql
     def run_sql(self, sql: str, purpose: str = "") -> ToolOutcome:
         try:
-            text = check_select(sql)
+            text = check_select(sql, self.tables)
         except SqlRejected as e:
             return ToolOutcome(f"실행 거부: {e}", is_error=True, meta={"rejected": True})
         try:
             res = self.db.query(text)
-        except psycopg.errors.QueryCanceled:
-            return ToolOutcome(
-                "시간 초과(5초)로 취소됨. 조건을 좁히거나 집계 방식을 바꾸세요.", is_error=True, meta={"db_error": "timeout"}
-            )
         except psycopg.Error as e:
-            msg = (e.diag.message_primary or str(e)).strip()
-            hint = f" (힌트: {e.diag.message_hint})" if e.diag.message_hint else ""
-            return ToolOutcome(f"DB 오류: {msg}{hint}", is_error=True, meta={"db_error": msg})
+            return db_error_outcome(e)
         lines = [" | ".join(res.columns)]
         lines += [" | ".join(cell(v) for v in row) for row in res.rows]
         n = f"{len(res.rows)}행" + (f" (앞 {MAX_ROWS}행만 표시, 실제로는 더 있음)" if res.truncated else "")
@@ -242,6 +244,16 @@ class Toolbox:
             text = ch.text if len(ch.text) <= DOC_CHARS else ch.text[:DOC_CHARS] + "…"
             parts.append(f"[{ch.source} § {ch.heading}] (점수 {score:.1f})\n{text}")
         return ToolOutcome("\n\n---\n\n".join(parts), meta={"sources": sorted({c.source for _, c in hits})})
+
+
+def db_error_outcome(e: psycopg.Error) -> ToolOutcome:
+    if isinstance(e, psycopg.errors.QueryCanceled):
+        return ToolOutcome(
+            "시간 초과(5초)로 취소됨. 조건을 좁히거나 집계 방식을 바꾸세요.", is_error=True, meta={"db_error": "timeout"}
+        )
+    msg = (e.diag.message_primary or str(e)).strip()
+    hint = f" (힌트: {e.diag.message_hint})" if e.diag.message_hint else ""
+    return ToolOutcome(f"DB 오류: {msg}{hint}", is_error=True, meta={"db_error": msg})
 
 
 def as_tool_result(tool_use_id: str, outcome: ToolOutcome) -> dict:

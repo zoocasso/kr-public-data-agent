@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-CORPUS_GLOBS = ("data/raw/*/*.md", "docs/corpus/*.md")
+CORPUS_GLOBS = ("data/raw/*/*.md",)
 CHUNK_CHARS = 900
 
 _WORD = re.compile(r"[a-z0-9]+")

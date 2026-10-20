@@ -2,9 +2,9 @@
 
 [![tests](https://github.com/zoocasso/kr-public-data-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/zoocasso/kr-public-data-agent/actions/workflows/ci.yml)
 
-공공 R&D·조달 공개 데이터에 자연어로 질문하면, 에이전트가 스키마를 찾아 SQL을 만들고 실행·검증한 뒤 **근거 쿼리와 함께** 답하는 도구.
+공공 R&D 공개 데이터에 자연어로 질문하면, 에이전트가 스키마를 찾아 SQL을 만들고 실행·검증한 뒤 **근거 쿼리와 함께** 답하는 도구.
 
-A natural-language query agent over Korean public R&D and procurement open data. Every number in an answer comes with the SQL that produced it.
+A natural-language query agent over Korean public R&D open data (procurement data is planned, not loaded yet). Every number in an answer comes with the SQL that produced it.
 
 > 진행 중 (2026-10). MVP 목표 2026-11 중순, 평가표·docker compose 배포 2026-12.
 
@@ -26,22 +26,31 @@ A natural-language query agent over Korean public R&D and procurement open data.
 
 ```
 agent/
-  tools.py      list_tables · describe_table · run_sql · search_docs · submit_answer
-  sql_guard.py  run_sql 입력 검사 (단일 SELECT, 위험 함수 차단)
-  db.py         읽기 전용 계정 + 서버 쪽 커서로 최대 200행
-  docs.py       설명서·데이터 사전 BM25 검색 (한글 2-gram)
-  loop.py       도구 호출 루프 (프레임워크 없이 Anthropic SDK 로 직접 구현)
+  tools.py          list_tables · describe_table · run_sql · search_docs · submit_answer
+  sql_guard.py      run_sql 입력 검사 (단일 SELECT, 함수·테이블 허용 목록)
+  db.py             읽기 전용 계정 + 서버 쪽 커서로 최대 200행
+  docs.py           설명서·데이터 사전 BM25 검색 (한글 2-gram)
+  loop.py           도구 호출 루프 (프레임워크 없이 Anthropic SDK 로 직접 구현)
+  llm.py            모델·effort 설정, 토큰·비용 집계
+  ollama_client.py  로컬 모델(Ollama)을 같은 루프로 돌리는 어댑터
+  prompts.py        시스템 프롬프트
 eval/
   questions.yaml  평가 질문 40개 + 정답 쿼리
+  make_gold.py    정답 쿼리를 실행해 gold.json 생성
   gold.json       정답 쿼리 실행 결과
   baselines.py    비교 대상: closed_book, oneshot_sql
+  grade.py        채점 규칙, 근거 쿼리 확인
   run.py          실행·채점·결과 표
+scripts/
+  fetch_data.py   공공데이터포털에서 원본 받기 (개인 이름 칼럼은 받을 때 삭제)
+  load_db.py      원본을 Postgres 에 적재
 ```
 
 ### 설계 메모
 
-- **두 겹의 쓰기 차단.** `run_sql` 은 sqlglot 으로 단일 SELECT 만 통과시키고, DB 쪽 `agent_ro` 계정은 SELECT 권한만, `default_transaction_read_only=on`, `statement_timeout=5s`. 서버 쪽 커서(`DECLARE CURSOR`)는 SELECT 외 문장을 받지 않는다.
-- **근거 쿼리 = 실제 실행된 쿼리.** SQL 을 고쳐 쓰지 않고 원문 그대로 실행하고, 행 수 제한은 커서에서 건다. 답을 제출하면 근거 쿼리가 이번 실행에서 성공했던 쿼리인지 확인하고 다시 실행해 결과를 붙인다.
+- **허용 목록 검사 + 읽기 전용 계정.** `run_sql` 은 sqlglot 으로 단일 SELECT 인지, 쓰는 함수가 허용 목록(집계·윈도·조건·숫자·문자열·날짜·형 변환)에 있는지, 읽는 테이블이 공개 데이터 테이블(또는 쿼리 안의 CTE)인지 확인한다. 그래서 `query_to_xml('select pg_sleep(4)', …)`, `pg_notify`, advisory lock, `current_setting`, `pg_roles` 같은 시스템 카탈로그는 실행 전에 거절된다. DB 쪽 `agent_ro` 계정은 SELECT 권한만 있어서 트랜잭션을 읽기·쓰기로 바꿔도 쓰지 못하고(테스트로 확인), `default_transaction_read_only=on`, `statement_timeout=5s` 가 걸린다. 다만 권한만으로는 `pg_notify` 나 advisory lock 같은 부작용 함수를 막지 못하므로 함수 허용 목록이 그 몫을 맡는다.
+- **근거 쿼리 = 실제 실행된 쿼리.** SQL 을 고쳐 쓰지 않고 원문 그대로 실행하고, 행 수 제한은 커서에서 건다. 답을 제출하면 근거 쿼리가 이번 실행에서 성공했던 쿼리인지 확인하고 다시 실행해 결과(앞 50행)를 붙인다. 채점에서는 정답 여부와 따로, 그 결과에 제출한 값이 모두 들어 있는지를 보고 결과 표에 "근거 쿼리 결과로 값이 확인된 정답" 비율을 낸다.
+- **오류도 기록으로 남긴다.** DB 오류(시간 초과 포함)는 모델에게 도구 오류로 돌려줘서 고쳐 쓰게 한다. API·Ollama 호출이나 하네스가 실패하면 예외 대신 그때까지의 도구 호출 기록과 토큰 사용량을 담아 `api_error`·`harness_error` 로 끝난다. 사용량을 알 수 없는 문항의 비용은 0 으로 세지 않고 따로 표시한다.
 - **스키마는 DB 주석에서.** 칼럼 이름은 영문, 원본 항목명과 의미는 `COMMENT` 로 저장. `describe_table` 은 주석과 함께 값 분포(고유값이 적은 칼럼은 전체 값과 건수)를 보여 줘서 모델이 `'미분류'` 같은 표기를 추측하지 않고 확인하게 한다.
 - **최종 답은 도구로 제출.** `submit_answer(answer, values, evidence_sql, sources, refused)` 로 끝나서 채점과 화면 표시가 같은 구조를 쓴다.
 - 모델 기본값 `claude-opus-5-5`, effort `medium`, 프롬프트 캐시 자동, 안전 분류기 거절 시 서버 쪽 폴백(`fallbacks: "default"`).
@@ -65,7 +74,7 @@ eval/
 - `oneshot_sql` — 스키마를 프롬프트로 주고 SQL 한 번 생성·실행, 수정 루프 없음
 - `agent` — 이 프로젝트
 
-채점: 숫자는 상대오차(개수는 정확히, 금액 1%), 순위는 순서까지, 동점은 집합, 거절 문항은 거절해야 정답, 답할 수 있는 문항을 거절하면 오답. 결과 표는 `eval/results/` 에 쌓인다. 첫 전체 실행은 2026-11 예정이라 아직 결과 표는 없다.
+채점 ([eval/grade.py](eval/grade.py)): 숫자는 상대오차(개수는 정확히, 금액 1%)로 보되 제출한 숫자가 모두 맞아야 하고(여러 개를 내고 하나만 맞으면 오답), 여러 숫자는 개수와 순서까지, 순위는 순서까지, 동점은 집합으로 본다. 거절 문항은 거절해야 정답, 답할 수 있는 문항을 거절하면 오답. 문서 질문은 필수 표현이 모두 있고 틀린 주장 표현이 없어야 정답이다 (공백 무시, 문장의 뜻까지 판정하지는 않는다). 결과는 `eval/results/` 에 쌓이고 git 에는 올리지 않는다. 첫 전체 실행은 2026-11 예정이라 아직 결과 표는 없다.
 
 ## 실행
 

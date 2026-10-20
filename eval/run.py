@@ -28,7 +28,7 @@ from agent.loop import run_agent
 from agent.tools import Toolbox
 
 from .baselines import closed_book, oneshot_sql
-from .grade import grade
+from .grade import evidence_supports, grade
 
 ROOT = Path(__file__).resolve().parent.parent
 EVAL = ROOT / "eval"
@@ -66,6 +66,7 @@ def summarize(rows: list[dict], questions: list[dict], systems: list[str], meta:
     for r in rows:
         by_sys[r["system"]].append(r)
     qcat = {q["id"]: q["category"] for q in questions}
+    qtype = {q["id"]: q["answer_type"] for q in questions}
 
     lines = [
         f"# 평가 결과 {meta['started'][:16]}",
@@ -93,9 +94,9 @@ def summarize(rows: list[dict], questions: list[dict], systems: list[str], meta:
             f"└ {c}",
             lambda rs, c=c: _pct(sum(r["correct"] for r in rs if qcat[r["id"]] == c), sum(1 for r in rs if qcat[r["id"]] == c)),
         )
-    row("응답 시간 중앙값(초)", lambda rs: f"{statistics.median(r['latency_s'] for r in rs):.1f}" if rs else "–")
-    row("질문당 비용($)", lambda rs: f"{sum(r['usage']['cost_usd'] or 0 for r in rs) / max(len(rs), 1):.4f}")
-    row("총 비용($)", lambda rs: f"{sum(r['usage']['cost_usd'] or 0 for r in rs):.3f}")
+    row("응답 시간 중앙값(초)", _median_latency)
+    row("질문당 비용($)", lambda rs: _cost(rs, per_question=True))
+    row("총 비용($)", lambda rs: _cost(rs, per_question=False))
 
     agent = by_sys.get("agent", [])
     if agent:
@@ -104,6 +105,9 @@ def summarize(rows: list[dict], questions: list[dict], systems: list[str], meta:
         had_err = [r for r in agent if r.get("sql_errors", 0) > 0]
         answered = [r for r in agent if r["status"] == "answered" and r.get("evidence_sql")]
         verified = [r for r in answered if (r.get("evidence_check") or {}).get("executed_in_run")]
+        # 데이터 질문에서 맞힌 답 중, 근거 쿼리를 다시 실행한 결과에 제출 값이 모두 들어 있는 것
+        correct_data = [r for r in agent if r["correct"] and qtype[r["id"]] not in ("refuse", "text")]
+        supported = [r for r in correct_data if evidence_supports(r)]
         lines += [
             "",
             "## 에이전트 동작",
@@ -111,6 +115,7 @@ def summarize(rows: list[dict], questions: list[dict], systems: list[str], meta:
             f"- 질문당 도구 호출 평균 {calls / len(agent):.1f}회, 도구 호출 성공률 {_pct(calls - failed, calls)}",
             f"- SQL 오류가 한 번 이상 난 질문 {len(had_err)}개 중 최종 정답 {sum(r['correct'] for r in had_err)}개",
             f"- 근거 쿼리가 실제 실행된 쿼리와 일치 {_pct(len(verified), len(answered))}",
+            f"- 데이터 질문 정답 중 근거 쿼리 결과로 값이 확인됨 {_pct(len(supported), len(correct_data))}",
             "- 종료 상태: " + ", ".join(f"{k} {v}" for k, v in sorted(_count(r["status"] for r in agent).items())),
         ]
 
@@ -120,6 +125,21 @@ def summarize(rows: list[dict], questions: list[dict], systems: list[str], meta:
         cells = " | ".join(mark.get((s, q["id"]), "") for s in systems)
         lines.append(f"| {q['id']} | {q['category']} | {q['question']} | {cells} |")
     return "\n".join(lines) + "\n"
+
+
+def _median_latency(rs: list[dict]) -> str:
+    known = [r["latency_s"] for r in rs if r.get("latency_s") is not None]
+    return f"{statistics.median(known):.1f}" if known else "–"
+
+
+def _cost(rs: list[dict], per_question: bool) -> str:
+    """비용을 모르는 문항(하네스 오류, 가격표에 없는 모델)은 0 으로 치지 않고 빼고, 몇 건인지 붙인다."""
+    known = [r["usage"]["cost_usd"] for r in rs if (r.get("usage") or {}).get("cost_usd") is not None]
+    if not known:
+        return "–"
+    text = f"{sum(known) / len(known):.4f}" if per_question else f"{sum(known):.3f}"
+    missing = len(rs) - len(known)
+    return text + (f" (모름 {missing}건 제외)" if missing else "")
 
 
 def _count(it):
@@ -165,13 +185,15 @@ def main() -> None:
             try:
                 pred = fut.result()
             except Exception as e:  # 한 문항 실패가 전체 실행을 멈추지 않게
+                # 에이전트·베이스라인은 API·도구 오류를 스스로 기록하므로, 여기 오는 것은 DB 연결 실패나 하네스 버그다.
+                # 사용량을 알 수 없으므로 비용은 0 이 아니라 None(모름)으로 남기고 요약에 따로 센다.
                 pred = {
                     "status": "harness_error",
                     "answer": f"{type(e).__name__}: {e}",
                     "values": [],
                     "refused": False,
-                    "usage": {"cost_usd": 0},
-                    "latency_s": 0,
+                    "usage": {"cost_usd": None},
+                    "latency_s": None,
                 }
             ok, why = grade(q, gold.get(q["id"]), pred)
             row = {"id": q["id"], "system": s, "correct": ok, "why": why, **pred}

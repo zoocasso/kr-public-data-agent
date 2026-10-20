@@ -6,7 +6,8 @@
 #   ordered_list  gold_sql 결과 첫 칼럼, 순서까지 일치
 #   set           gold_sql 결과 첫 칼럼, 순서 무관 (동점 등)
 #   refuse        데이터로 답할 수 없는 질문. 거절(또는 "데이터에 없음")해야 정답
-#   text          문서 근거 질문. must_include 의 각 항목이 답에 들어가야 함 ("a|b" 는 둘 중 하나)
+#   text          문서 근거 질문. must_include 의 각 항목이 답에 들어가야 하고 ("a|b" 는 둘 중 하나),
+#                 must_not_include(틀린 주장) 는 하나도 없어야 함. 공백은 무시. 뜻까지 판정하지는 않음
 #
 # category
 #   aggregate  단순 집계          grain   행 단위와 과제 단위 구분, 결측 표기 등 함정
@@ -303,20 +304,21 @@ questions:
     question: KEIT 데이터에 나오는 주관부처 코드 1450000은 지금도 쓰는 코드야?
     answer_type: text
     must_include: ["폐지", "1451000|산업통상부"]
+    must_not_include: ["폐지되지 않", "폐지된 적이 없", "아직 유효", "지금도 유효", "현재도 유효"]
     source: data/raw/keit/데이터설명서.md
 
   - id: r39
     category: docs
     question: 해양수산 R&D 연구비 데이터는 왜 2023년까지만 있어?
     answer_type: text
-    must_include: ["IRIS|범부처통합연구지원시스템"]
+    must_include: ["IRIS|범부처통합연구지원시스템", "이관|옮|중단"]
     source: data/raw/kimst/portal_description.md
 
   - id: r40
     category: docs
     question: KEIT 데이터의 개발시작일과 개발종료일은 원래 어떤 값에서 나온 거야?
     answer_type: text
-    must_include: ["총개발기간"]
+    must_include: ["총개발기간", "나눈|나누|분리|쪼갠"]
     source: data/raw/keit/데이터설명서.md
 
   # ---------------------------------------------------------------- 조달 (나라장터)

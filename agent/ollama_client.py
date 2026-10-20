@@ -10,14 +10,20 @@ Anthropic 응답과 같은 속성(content 블록, stop_reason, usage, model)으�
 
 from __future__ import annotations
 
+import http.client
 import itertools
 import json
 import os
+import urllib.error
 import urllib.request
 from types import SimpleNamespace as NS
 
 PREFIX = "ollama:"
 _ids = itertools.count(1)
+
+
+class OllamaError(RuntimeError):
+    """Ollama 서버에 닿지 못했거나 응답을 읽지 못함. 에이전트 루프는 anthropic.APIError 처럼 다룬다."""
 
 
 def is_ollama(model: str) -> bool:
@@ -114,8 +120,11 @@ class OllamaClient:
         req = urllib.request.Request(
             f"{self.host}/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"}
         )
-        with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-            data = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                data = json.loads(resp.read())
+        except (urllib.error.URLError, http.client.HTTPException, OSError, json.JSONDecodeError) as e:
+            raise OllamaError(f"{self.host}: {type(e).__name__}: {e}") from e
         return self._response(model, data)
 
     @staticmethod

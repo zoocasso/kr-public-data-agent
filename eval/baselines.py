@@ -14,7 +14,10 @@ import json
 import time
 from pathlib import Path
 
+import anthropic
+
 from agent import llm
+from agent.ollama_client import OllamaError
 from agent.tools import Toolbox
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -69,24 +72,30 @@ def schema_text() -> str:
     return (ROOT / "db" / "init" / "01_schema.sql").read_text()
 
 
-def _call(client, model: str, effort: str, system: str, question: str, fmt: dict) -> tuple[dict, llm.Usage, str]:
+def _call(client, model: str, effort: str, system: str, question: str, fmt: dict) -> tuple[dict, llm.Usage, str, str]:
+    """(구조화 출력, 사용량, 상태, 오류 메시지). 호출이 실패해도 예외를 올리지 않고 그때까지의 사용량을 돌려준다."""
     usage = llm.Usage(model)
     kwargs = llm.request_kwargs(model, effort)
     kwargs["output_config"] = {**kwargs["output_config"], "format": fmt}
-    response = client.beta.messages.create(system=system, messages=[{"role": "user", "content": question}], **kwargs)
-    usage.add(response)
-    if response.stop_reason in ("refusal", "max_tokens"):
-        return {}, usage, response.stop_reason
-    text = next(b.text for b in response.content if b.type == "text")
-    return json.loads(text), usage, "ok"
+    try:
+        response = client.beta.messages.create(system=system, messages=[{"role": "user", "content": question}], **kwargs)
+        usage.add(response)
+        if response.stop_reason in ("refusal", "max_tokens"):
+            return {}, usage, response.stop_reason, ""
+        text = next(b.text for b in response.content if b.type == "text")
+        return json.loads(text), usage, "ok", ""
+    except (anthropic.APIError, OllamaError) as e:
+        return {}, usage, "api_error", f"{type(e).__name__}: {e}"
+    except (StopIteration, json.JSONDecodeError) as e:  # 구조화 출력이 비었거나 JSON 이 아님
+        return {}, usage, "bad_output", f"{type(e).__name__}: {e}"
 
 
 def closed_book(question: str, *, client, model: str, effort: str, **_) -> dict:
     t0 = time.perf_counter()
-    out, usage, stop = _call(client, model, effort, CLOSED_BOOK_SYSTEM, question, _CLOSED_FORMAT)
+    out, usage, stop, error = _call(client, model, effort, CLOSED_BOOK_SYSTEM, question, _CLOSED_FORMAT)
     return {
         "status": ("refused" if out.get("refused") else "answered") if stop == "ok" else stop,
-        "answer": out.get("answer", ""),
+        "answer": out.get("answer", "") or error,
         "values": out.get("values", []),
         "refused": bool(out.get("refused")),
         "usage": usage.as_dict(),
@@ -107,10 +116,10 @@ def _values_from_rows(answer_type: str, rows: list[list[str]]) -> list[str]:
 def oneshot_sql(question: str, *, client, model: str, effort: str, toolbox: Toolbox, answer_type: str, **_) -> dict:
     t0 = time.perf_counter()
     system = ONESHOT_SYSTEM.format(schema=schema_text())
-    out, usage, stop = _call(client, model, effort, system, question, _ONESHOT_FORMAT)
+    out, usage, stop, error = _call(client, model, effort, system, question, _ONESHOT_FORMAT)
     pred = {
         "status": stop,
-        "answer": out.get("reason", ""),
+        "answer": out.get("reason", "") or error,
         "values": [],
         "refused": bool(out.get("refused")),
         "evidence_sql": out.get("sql", ""),

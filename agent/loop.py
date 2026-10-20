@@ -3,6 +3,7 @@
 질문 → [Claude 응답 → 도구 실행 → 결과 전달] 반복 → submit_answer 로 종료.
 매 호출의 사용량을 모으고, 도구 호출 기록(trace)을 남기며,
 제출된 근거 쿼리가 실제로 실행됐던 쿼리인지 확인하고 다시 실행해 결과를 붙인다.
+API·로컬 모델·하네스 오류로 멈춰도 예외를 올리지 않고, 그때까지의 trace 와 사용량을 담아 돌려준다.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from dataclasses import asdict, dataclass, field
 import anthropic
 
 from . import llm
+from .ollama_client import OllamaError
 from .prompts import SYSTEM_PROMPT
 from .tools import Toolbox, as_tool_result
 
@@ -24,7 +26,8 @@ NUDGE = "submit_answer 도구로 최종 답을 제출해 주세요."
 @dataclass
 class AgentResult:
     question: str
-    status: str  # answered | refused | no_answer | max_calls | model_refusal | max_tokens | api_error
+    # answered | refused | no_answer | max_calls | model_refusal | max_tokens | api_error | harness_error
+    status: str
     answer: str = ""
     values: list[str] = field(default_factory=list)
     evidence_sql: str = ""
@@ -133,8 +136,11 @@ def run_agent(
                 emit("tool", **record)
                 tool_results.append(as_tool_result(block.id, outcome))
             messages.append({"role": "user", "content": tool_results})
-    except anthropic.APIError as e:
+    except (anthropic.APIError, OllamaError) as e:
         result.status = "api_error"
+        result.answer = f"{type(e).__name__}: {e}"
+    except Exception as e:  # 도구나 루프의 버그: 평가가 이 문항의 trace·사용량을 잃지 않게 기록하고 끝낸다
+        result.status = "harness_error"
         result.answer = f"{type(e).__name__}: {e}"
 
     result.latency_s = round(time.perf_counter() - start, 2)
