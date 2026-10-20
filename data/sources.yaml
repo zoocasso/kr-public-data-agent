@@ -1,0 +1,30 @@
+# 공개 데이터 출처. scripts/fetch_data.py 가 이 목록을 읽어 data/raw/ 에 내려받는다.
+# 모든 데이터는 공공데이터포털(data.go.kr) 파일데이터이며 "이용허락범위 제한 없음" 조건이다.
+datasets:
+  - key: keit
+    dataset_id: 15018033
+    title: 한국산업기술기획평가원_산업기술 연구개발 과제현황
+    provider: 한국산업기술기획평가원(KEIT)
+    version: "20260721"
+    coverage: 2015~2026 지원 과제 11,900건 (과제 단위, 연구비 금액 없음)
+    page: https://www.data.go.kr/data/15018033/fileData.do
+    license: 이용허락범위 제한 없음
+
+  - key: kimst
+    dataset_id: 15104466
+    title: 해양수산과학기술진흥원_해양수산 분야 RnD 수행 과제(세부)별 연구비 정보
+    provider: 해양수산과학기술진흥원(KIMST)
+    version: "20230504"
+    coverage: 2021~2023 예산년도, 과제×수행기관 4,694행 (총 연구비·정부출연금, 원 단위)
+    page: https://www.data.go.kr/data/15104466/fileData.do
+    license: 이용허락범위 제한 없음
+    drop_columns: [연구책임자]   # 마스킹된 개인 이름. 받을 때 지우고 저장소에도 두지 않는다
+
+  - key: ketep
+    dataset_id: 15106650
+    title: 한국에너지기술평가원_지원과제정보
+    provider: 한국에너지기술평가원(KETEP)
+    version: "20221231"
+    coverage: 2022 기준연도, 과제×수행기관 4,220행 (기관 유형·지역, 금액 없음)
+    page: https://www.data.go.kr/data/15106650/fileData.do
+    license: 이용허락범위 제한 없음

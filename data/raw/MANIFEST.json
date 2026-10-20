@@ -1,0 +1,87 @@
+[
+  {
+    "key": "keit",
+    "dataset_id": 15018033,
+    "atch_file_id": "FILE_000000007692508",
+    "file": "keit/portal_description.md",
+    "bytes": 2189,
+    "sha256": "541049b8080ff2768218317856757886b88281c1f5a4dfa12a4b93d34e8a57c1",
+    "retrieved": "2026-10-13"
+  },
+  {
+    "key": "keit",
+    "dataset_id": 15018033,
+    "atch_file_id": "FILE_000000007692508",
+    "file": "keit/데이터사전.csv",
+    "bytes": 4540,
+    "sha256": "3bc5fd7d24f2562e42a4c0c082e2454c4cbc43dfe16d6e08710fec781446f489",
+    "retrieved": "2026-10-13"
+  },
+  {
+    "key": "keit",
+    "dataset_id": 15018033,
+    "atch_file_id": "FILE_000000007692508",
+    "file": "keit/데이터사전.md",
+    "bytes": 5892,
+    "sha256": "e66e37ff0802a1388a685ef000bbee60e6d91ae52a010adb87d39aeda020c1ec",
+    "retrieved": "2026-10-13"
+  },
+  {
+    "key": "keit",
+    "dataset_id": 15018033,
+    "atch_file_id": "FILE_000000007692508",
+    "file": "keit/데이터설명서.md",
+    "bytes": 12983,
+    "sha256": "23f52f49421d23b013d6a8337d490de03a65f41ac335bced8fcda827d7987265",
+    "retrieved": "2026-10-13"
+  },
+  {
+    "key": "keit",
+    "dataset_id": 15018033,
+    "atch_file_id": "FILE_000000007692508",
+    "file": "keit/한국산업기술기획평가원_산업기술 연구개발 과제현황_20260721_정비.xlsx",
+    "bytes": 1747866,
+    "sha256": "10ccb70cf5d7258c2fe6e9f31acbe053abe1b78441d677a22ed8d7d0839917c5",
+    "retrieved": "2026-10-13"
+  },
+  {
+    "key": "ketep",
+    "dataset_id": 15106650,
+    "atch_file_id": "FILE_000000002825615",
+    "file": "ketep/portal_description.md",
+    "bytes": 3657,
+    "sha256": "0755993fa401778e9f6ce868a8dce5436d9863d11b876e26795796b8cf68c981",
+    "retrieved": "2026-10-13"
+  },
+  {
+    "key": "ketep",
+    "dataset_id": 15106650,
+    "atch_file_id": "FILE_000000002825615",
+    "file": "ketep/한국에너지기술평가원_지원과제 정보(2022년).csv",
+    "bytes": 1111108,
+    "sha256": "a10e8a1985bde0c94c32c2d1bb826a625c802f0af591d9e5179f2e2c8bf6af03",
+    "retrieved": "2026-10-13"
+  },
+  {
+    "key": "kimst",
+    "dataset_id": 15104466,
+    "atch_file_id": "FILE_000000002819184",
+    "file": "kimst/portal_description.md",
+    "bytes": 4215,
+    "sha256": "6f2d4f6d5bfbfef58845198f683f242becdc8d27fb43711356e08b76b62b5a27",
+    "retrieved": "2026-10-13"
+  },
+  {
+    "key": "kimst",
+    "dataset_id": 15104466,
+    "atch_file_id": "FILE_000000002819184",
+    "file": "kimst/해양 수산 분야 R&D 과제(세부)별 연구비정보_20230504.csv",
+    "source_sha256": "4095792e66fd4b49067223b94d223be16485774a1aee35e2abc416ce691b36b5",
+    "dropped_columns": [
+      "연구책임자"
+    ],
+    "bytes": 772557,
+    "sha256": "b30612d23a46b862da92968f216a155adfb9d1e0f2c845b035a8aa0780a15b9c",
+    "retrieved": "2026-10-13"
+  }
+]

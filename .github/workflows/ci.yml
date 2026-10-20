@@ -1,0 +1,27 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # throwaway credentials for the CI database only
+      POSTGRES_PASSWORD: ci-app
+      AGENT_DB_PASSWORD: ci-agent
+      DATABASE_URL: postgresql://app:ci-app@127.0.0.1:5432/publicdata
+      AGENT_DATABASE_URL: postgresql://agent_ro:ci-agent@127.0.0.1:5432/publicdata
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt ruff
+      - run: ruff check .
+      - run: ruff format --check .
+      # the same Postgres the project uses locally, with the read-only agent role from db/init
+      - run: docker compose up -d --wait
+      - run: python scripts/load_db.py
+      - run: python -m pytest -q

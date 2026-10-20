@@ -1,0 +1,323 @@
+# 평가 질문셋 (초안 v0.1, 2026-10-13)
+#
+# answer_type
+#   number        gold_sql 결과의 첫 칸 하나. tolerance 는 상대오차 (0 이면 정확히 일치)
+#   numbers       gold_sql 결과 첫 행의 여러 숫자, 순서대로
+#   ordered_list  gold_sql 결과 첫 칼럼, 순서까지 일치
+#   set           gold_sql 결과 첫 칼럼, 순서 무관 (동점 등)
+#   refuse        데이터로 답할 수 없는 질문. 거절(또는 "데이터에 없음")해야 정답
+#   text          문서 근거 질문. must_include 의 각 항목이 답에 들어가야 함 ("a|b" 는 둘 중 하나)
+#
+# category
+#   aggregate  단순 집계          grain   행 단위와 과제 단위 구분, 결측 표기 등 함정
+#   topk       그룹·순위          join    여러 테이블·데이터셋
+#   refuse     답할 수 없음        docs    문서 검색이 필요한 질문
+#
+# 정답 값은 eval/make_gold.py 가 gold_sql 을 실행해 eval/gold.json 에 저장한다.
+
+questions:
+  # ---------------------------------------------------------------- aggregate
+  - id: r01
+    category: aggregate
+    question: 2024년에 지원한 KEIT 산업기술 R&D 과제는 몇 건이야?
+    answer_type: number
+    gold_sql: SELECT count(*) FROM keit_projects WHERE support_year = 2024
+
+  - id: r02
+    category: aggregate
+    question: KEIT 과제 중에 소방청이 주관부처인 건 몇 개야?
+    answer_type: number
+    gold_sql: SELECT count(*) FROM keit_projects WHERE ministry = '소방청'
+
+  - id: r03
+    category: aggregate
+    question: 2022년 해양수산 R&D에 들어간 총 연구비 합계는 얼마인가요?
+    answer_type: number
+    tolerance: 0.01
+    gold_sql: SELECT sum(total_budget_krw) FROM kimst_project_budgets WHERE budget_year = 2022
+
+  - id: r04
+    category: aggregate
+    question: 2023년 해양수산 R&D 정부출연금 합계 알려줘
+    answer_type: number
+    tolerance: 0.01
+    gold_sql: SELECT sum(gov_grant_krw) FROM kimst_project_budgets WHERE budget_year = 2023
+
+  - id: r05
+    category: aggregate
+    question: 해양수산 R&D 2021~2023년 3년 동안 총 연구비를 다 더하면 얼마야?
+    answer_type: number
+    tolerance: 0.01
+    gold_sql: SELECT sum(total_budget_krw) FROM kimst_project_budgets WHERE budget_year BETWEEN 2021 AND 2023
+
+  - id: r06
+    category: aggregate
+    question: KEIT 과제의 평균 개발기간은 몇 년 정도야?
+    answer_type: number
+    tolerance: 0.03
+    gold_sql: SELECT avg(end_date - start_date + 1) / 365.25 FROM keit_projects
+
+  - id: r07
+    category: aggregate
+    question: KEIT 과제 중 개발 종료일이 2027년 1월 1일 이후(당일 포함)인 과제는 몇 건이야?
+    answer_type: number
+    gold_sql: SELECT count(*) FROM keit_projects WHERE end_date >= DATE '2027-01-01'
+
+  - id: r08
+    category: aggregate
+    question: 과제명에 '수소'가 들어간 KEIT 과제는 몇 건이야?
+    answer_type: number
+    gold_sql: SELECT count(*) FROM keit_projects WHERE title LIKE '%수소%'
+
+  - id: r09
+    category: aggregate
+    question: KEIT 과제 중 대학교(기관명에 '대학교'가 들어간 곳)가 주관한 과제는 몇 건이야?
+    answer_type: number
+    gold_sql: SELECT count(*) FROM keit_projects WHERE lead_org LIKE '%대학교%'
+
+  # ---------------------------------------------------------------- grain / 결측 함정
+  - id: r10
+    category: grain
+    question: 한국에너지기술평가원(KETEP)이 2022년에 지원한 과제는 몇 개야?
+    answer_type: number
+    gold_sql: SELECT count(DISTINCT project_title) FROM ketep_project_orgs WHERE base_year = 2022
+    notes: 1행 = 과제×수행기관이라 count(*) 4,220 은 오답
+
+  - id: r11
+    category: grain
+    question: 2022년 해양수산 R&D 과제는 몇 개였어?
+    answer_type: number
+    gold_sql: |
+      SELECT count(DISTINCT (program_name, project_title))
+      FROM kimst_project_budgets WHERE budget_year = 2022
+    notes: 1행 = 과제×기관. count(*) 1,747 은 오답
+
+  - id: r12
+    category: grain
+    question: KEIT 과제에 참여기관으로 한 번이라도 이름을 올린 기관은 몇 곳이야?
+    answer_type: number
+    gold_sql: SELECT count(DISTINCT org_name) FROM keit_project_participants
+
+  - id: r13
+    category: grain
+    question: KEIT 과제 중 사업분류가 정해져 있지 않은 과제는 몇 건이야?
+    answer_type: number
+    gold_sql: SELECT count(*) FROM keit_projects WHERE program_category = '미분류' OR program_category IS NULL
+    notes: 결측이 NULL 이 아니라 문자열 '미분류'. IS NULL 만 쓰면 0
+
+  - id: r14
+    category: grain
+    question: 2022년 해양수산 R&D에서 민간부담금(총 연구비 − 정부출연금) 합계는 얼마야?
+    answer_type: number
+    tolerance: 0.01
+    gold_sql: |
+      SELECT sum(total_budget_krw - gov_grant_krw)
+      FROM kimst_project_budgets WHERE budget_year = 2022
+
+  # ---------------------------------------------------------------- topk
+  - id: r15
+    category: topk
+    question: KEIT 과제가 가장 많은 세부분야 상위 3개를 순서대로 알려줘
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT field_detail FROM keit_projects
+      GROUP BY field_detail ORDER BY count(*) DESC LIMIT 3
+
+  - id: r16
+    category: topk
+    question: KEIT에서 과제를 가장 많이 주관한 기관 5곳을 많은 순서대로 알려줘
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT lead_org FROM keit_projects
+      GROUP BY lead_org ORDER BY count(*) DESC LIMIT 5
+
+  - id: r17
+    category: topk
+    question: 2023년 해양수산 R&D 연구비를 가장 많이 받은 기관 3곳은?
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT org_name FROM kimst_project_budgets WHERE budget_year = 2023
+      GROUP BY org_name ORDER BY sum(total_budget_krw) DESC LIMIT 3
+
+  - id: r18
+    category: topk
+    question: 2022년 해양수산 R&D 연구비를 기관유형별로 합치면 어느 유형이 제일 많아?
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT org_type FROM kimst_project_budgets WHERE budget_year = 2022
+      GROUP BY org_type ORDER BY sum(total_budget_krw) DESC LIMIT 1
+
+  - id: r19
+    category: topk
+    question: 2023년 해양수산 R&D에서 연구비 합계가 가장 큰 사업은 뭐야?
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT program_name FROM kimst_project_budgets WHERE budget_year = 2023
+      GROUP BY program_name ORDER BY sum(total_budget_krw) DESC LIMIT 1
+
+  - id: r20
+    category: topk
+    question: KETEP 과제를 회계(재원)별로 세면 과제 수가 가장 많은 회계는?
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT account_name FROM ketep_project_orgs
+      GROUP BY account_name ORDER BY count(DISTINCT project_title) DESC LIMIT 1
+
+  - id: r21
+    category: topk
+    question: KETEP 과제에서 주관연구개발기관을 가장 많이 맡은 곳은?
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT org_name FROM ketep_project_orgs WHERE org_role = '주관연구개발기관'
+      GROUP BY org_name ORDER BY count(DISTINCT project_title) DESC LIMIT 1
+
+  - id: r22
+    category: topk
+    question: KEIT 과제가 가장 많았던 지원년도는?
+    answer_type: number
+    gold_sql: |
+      SELECT support_year FROM keit_projects
+      GROUP BY support_year ORDER BY count(*) DESC LIMIT 1
+
+  - id: r23
+    category: topk
+    question: KETEP 과제의 주관기관 소재지를 시도별로 보면 주관 건수가 가장 많은 곳은 어디야?
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT org_region FROM ketep_project_orgs WHERE org_role = '주관연구개발기관'
+      GROUP BY org_region ORDER BY count(*) DESC LIMIT 1
+
+  - id: r24
+    category: topk
+    question: 2025년에 지원한 KEIT 과제에서 가장 많은 기술분야는?
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT tech_field FROM keit_projects WHERE support_year = 2025
+      GROUP BY tech_field ORDER BY count(*) DESC LIMIT 1
+
+  - id: r25
+    category: topk
+    question: KEIT 세부분야가 '반도체장비'인 과제가 가장 많았던 해는 언제야?
+    answer_type: number
+    gold_sql: |
+      SELECT support_year FROM keit_projects WHERE field_detail = '반도체장비'
+      GROUP BY support_year ORDER BY count(*) DESC LIMIT 1
+
+  # ---------------------------------------------------------------- join
+  - id: r26
+    category: join
+    question: 한국생산기술연구원이 KEIT 과제에 참여기관으로 들어간 과제는 몇 건이야?
+    answer_type: number
+    gold_sql: SELECT count(*) FROM keit_project_participants WHERE org_name = '한국생산기술연구원'
+
+  - id: r27
+    category: join
+    question: 한국생산기술연구원이 KEIT 과제에서 주관하거나 참여한 과제는 모두 몇 건이야?
+    answer_type: number
+    gold_sql: |
+      SELECT count(*) FROM (
+        SELECT project_no FROM keit_projects WHERE lead_org = '한국생산기술연구원'
+        UNION
+        SELECT project_no FROM keit_project_participants WHERE org_name = '한국생산기술연구원'
+      ) t
+
+  - id: r28
+    category: join
+    question: 서울대학교산학협력단이 주관한 KEIT 과제 중 참여기관이 하나도 없는 과제는 몇 건이야?
+    answer_type: number
+    gold_sql: |
+      SELECT count(*) FROM keit_projects p
+      WHERE p.lead_org = '서울대학교산학협력단'
+        AND NOT EXISTS (SELECT 1 FROM keit_project_participants q WHERE q.project_no = p.project_no)
+
+  - id: r29
+    category: join
+    question: KEIT 과제 중 참여기관 수가 가장 많은 과제 이름이 뭐야?
+    answer_type: ordered_list
+    gold_sql: |
+      SELECT p.title FROM keit_projects p JOIN keit_project_participants q USING (project_no)
+      GROUP BY p.project_no, p.title ORDER BY count(*) DESC LIMIT 1
+
+  - id: r30
+    category: join
+    question: 2022년 기준으로 KEIT 지원 과제 수와 KETEP 지원 과제 수를 합치면 몇 개야?
+    answer_type: number
+    gold_sql: |
+      SELECT (SELECT count(*) FROM keit_projects WHERE support_year = 2022)
+           + (SELECT count(DISTINCT project_title) FROM ketep_project_orgs WHERE base_year = 2022)
+
+  - id: r31
+    category: join
+    question: 한국해양과학기술원은 2022년에 해양수산 R&D 과제와 KETEP 과제에 각각 몇 개씩 참여했어?
+    answer_type: numbers
+    gold_sql: |
+      SELECT
+        (SELECT count(DISTINCT (program_name, project_title)) FROM kimst_project_budgets
+          WHERE budget_year = 2022 AND org_name = '한국해양과학기술원'),
+        (SELECT count(DISTINCT project_title) FROM ketep_project_orgs
+          WHERE base_year = 2022 AND org_name = '한국해양과학기술원')
+
+  - id: r32
+    category: join
+    question: KETEP 과제 중 수행기관이 가장 많은 과제는 뭐야?
+    answer_type: set
+    gold_sql: |
+      SELECT project_title FROM ketep_project_orgs GROUP BY project_title
+      HAVING count(*) = (SELECT max(n) FROM (SELECT count(*) n FROM ketep_project_orgs GROUP BY project_title) t)
+    notes: 25곳으로 두 과제가 동점
+
+  # ---------------------------------------------------------------- refuse
+  - id: r33
+    category: refuse
+    question: KEIT 과제 중 연구비가 가장 큰 과제는 뭐야?
+    answer_type: refuse
+    reason: KEIT 데이터에는 연구비 금액 칼럼이 없음
+
+  - id: r34
+    category: refuse
+    question: 2024년 해양수산 R&D 총 연구비는 얼마야?
+    answer_type: refuse
+    reason: 해양수산 데이터는 2021~2023 예산년도까지만 있음 (IRIS 이관 후 생산 중단)
+
+  - id: r35
+    category: refuse
+    question: 해양수산 R&D에서 과제를 가장 많이 맡은 연구책임자는 누구야?
+    answer_type: refuse
+    reason: 연구책임자 칼럼은 개인정보라 적재하지 않음
+
+  - id: r36
+    category: refuse
+    question: KETEP 2022년 과제들의 정부출연금 합계는 얼마야?
+    answer_type: refuse
+    reason: KETEP 데이터에는 금액 칼럼이 없음
+
+  - id: r37
+    category: refuse
+    question: KEIT 과제 중 특허 성과가 가장 많은 과제는 뭐야?
+    answer_type: refuse
+    reason: 성과(특허·논문) 데이터는 적재하지 않음
+
+  # ---------------------------------------------------------------- docs
+  - id: r38
+    category: docs
+    question: KEIT 데이터에 나오는 주관부처 코드 1450000은 지금도 쓰는 코드야?
+    answer_type: text
+    must_include: ["폐지", "1451000|산업통상부"]
+    source: data/raw/keit/데이터설명서.md
+
+  - id: r39
+    category: docs
+    question: 해양수산 R&D 연구비 데이터는 왜 2023년까지만 있어?
+    answer_type: text
+    must_include: ["IRIS|범부처통합연구지원시스템"]
+    source: data/raw/kimst/portal_description.md
+
+  - id: r40
+    category: docs
+    question: KEIT 데이터의 개발시작일과 개발종료일은 원래 어떤 값에서 나온 거야?
+    answer_type: text
+    must_include: ["총개발기간"]
+    source: data/raw/keit/데이터설명서.md
+
+  # ---------------------------------------------------------------- 조달 (나라장터)
+  # 공공데이터포털 인증키 발급 후 g2b_bid_notices 적재하고 10문항 추가 예정
