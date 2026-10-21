@@ -4,8 +4,9 @@
 현재 다운로드 링크를 찾는다. 받은 파일의 sha256 은 data/raw/MANIFEST.json 에 남겨
 평가셋 정답이 어떤 스냅숏 기준인지 추적한다.
 
-sources.yaml 의 drop_columns 칼럼(개인 이름 등)은 저장하기 전에 지운다. MANIFEST 에는 받은 원본의
-해시(source_sha256)와 저장한 파일의 해시(sha256)를 함께 남긴다.
+sources.yaml 의 drop_columns 칼럼(개인 이름 등)은 저장하기 전에 지운다. 엑셀 파일은 작성자·마지막 수정자
+이름과 작성 PC 경로 같은 문서 메타데이터를 지운다 (데이터 시트는 그대로). 어느 쪽이든 MANIFEST 에는 받은
+원본의 해시(source_sha256)와 저장한 파일의 해시(sha256)를 함께 남긴다.
 
     python scripts/fetch_data.py            # 전체
     python scripts/fetch_data.py keit       # 일부만
@@ -66,6 +67,27 @@ def _portal_description(page_html: str, ds: dict) -> str:
         f"# {ds['title']} (공공데이터포털 설명)\n\n"
         f"- 출처: {ds['page']}\n- 수집일: {date.today().isoformat()}\n\n" + body[start : end if end > 0 else None].strip() + "\n"
     )
+
+
+# 사람 이름이나 작성 PC 경로가 들어가는 xlsx 메타데이터. 데이터 시트(xl/worksheets)는 건드리지 않는다.
+_XLSX_SCRUB = {
+    "docProps/core.xml": re.compile(r"<(dc:creator|cp:lastModifiedBy)>[^<]*</\1>"),
+    "docProps/app.xml": re.compile(r"<(Company|Manager)>[^<]*</\1>"),
+    "xl/workbook.xml": re.compile(r"<x15ac:absPath\b[^>]*/>"),
+}
+
+
+def scrub_xlsx_metadata(data: bytes) -> bytes:
+    """xlsx(zip) 의 작성자·마지막 수정자·회사 이름과 작성 PC 경로를 지운 사본. 다른 항목은 내용 그대로 옮긴다."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(io.BytesIO(data)) as zin, zipfile.ZipFile(out, "w") as zout:
+        for info in zin.infolist():
+            body = zin.read(info)
+            pattern = _XLSX_SCRUB.get(info.filename)
+            if pattern is not None:
+                body = pattern.sub("", body.decode("utf-8")).encode("utf-8")
+            zout.writestr(info, body)
+    return out.getvalue()
 
 
 def drop_csv_columns(data: bytes, columns: list[str]) -> bytes:
@@ -137,6 +159,10 @@ def fetch(ds: dict) -> list[dict]:
             record["source_sha256"] = hashlib.sha256(data).hexdigest()
             record["dropped_columns"] = drop
             data = drop_csv_columns(data, drop)
+        elif fname.lower().endswith(".xlsx"):
+            record["source_sha256"] = hashlib.sha256(data).hexdigest()
+            record["scrubbed_metadata"] = True
+            data = scrub_xlsx_metadata(data)
         (out_dir / fname).write_bytes(data)
         record |= {
             "bytes": len(data),

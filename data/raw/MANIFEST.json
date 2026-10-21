@@ -40,8 +40,10 @@
     "dataset_id": 15018033,
     "atch_file_id": "FILE_000000007692508",
     "file": "keit/한국산업기술기획평가원_산업기술 연구개발 과제현황_20260721_정비.xlsx",
-    "bytes": 1747866,
-    "sha256": "10ccb70cf5d7258c2fe6e9f31acbe053abe1b78441d677a22ed8d7d0839917c5",
+    "source_sha256": "10ccb70cf5d7258c2fe6e9f31acbe053abe1b78441d677a22ed8d7d0839917c5",
+    "scrubbed_metadata": true,
+    "bytes": 1503571,
+    "sha256": "85c932eb26b869fd0a3f7d924d1279bcc2d67a992e5d9164d66c004a3ba0c2b1",
     "retrieved": "2026-10-13"
   },
   {

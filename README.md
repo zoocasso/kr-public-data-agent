@@ -19,6 +19,7 @@ A natural-language query agent over Korean public R&D open data (procurement dat
 | `ketep_project_orgs` | 한국에너지기술평가원 과제별 수행기관 | 2022, 4,220행 |
 
 - KIMST 원본의 연구책임자(마스킹된 개인 이름) 칼럼은 받을 때 지운다 (`sources.yaml` 의 `drop_columns`). 저장소의 스냅숏에도 없고, MANIFEST 에는 원본 해시(`source_sha256`)와 저장본 해시를 함께 남긴다.
+- KEIT 엑셀 원본에 들어 있던 문서 메타데이터(마지막 수정자 이름, 작성 PC 경로)도 받을 때 지운다. 시트 내용은 그대로이고, MANIFEST 에 원본 해시를 함께 남긴다.
 - 결측 표기는 원본 그대로 둔다 (KEIT 는 NULL 대신 `'미분류'`, `'없음'`). 평가셋이 이 함정을 확인한다.
 - 나라장터 입찰공고(조달청 OpenAPI)는 인증키 발급 후 추가 예정.
 

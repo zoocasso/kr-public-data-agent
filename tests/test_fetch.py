@@ -1,6 +1,10 @@
+import io
+import zipfile
+from pathlib import Path
+
 import pytest
 
-from scripts.fetch_data import check_drop_columns, drop_csv_columns
+from scripts.fetch_data import check_drop_columns, drop_csv_columns, scrub_xlsx_metadata
 
 
 def test_drops_the_name_column_and_keeps_encoding_and_line_endings():
@@ -28,3 +32,41 @@ def test_drop_columns_on_a_non_csv_file_stops_before_anything_is_written():
     with pytest.raises(ValueError, match="CSV 가 아닌 파일"):
         check_drop_columns(ds, ["data.xlsx", "portal_description.md"])
     assert check_drop_columns({"key": "keit"}, ["data.xlsx"]) == []
+
+
+CORE = (
+    '<cp:coreProperties xmlns:cp="c" xmlns:dc="d"><dc:creator>홍길동</dc:creator>'
+    "<cp:lastModifiedBy>Hong</cp:lastModifiedBy><dcterms:created>2026-09-18</dcterms:created></cp:coreProperties>"
+)
+WORKBOOK = (
+    '<workbook><mc:AlternateContent><mc:Choice Requires="x15">'
+    '<x15ac:absPath url="C:\\Users\\someone\\Documents\\" xmlns:x15ac="x"/></mc:Choice></mc:AlternateContent>'
+    "<sheets/></workbook>"
+)
+
+
+def _xlsx(parts: dict[str, str]) -> bytes:
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, body in parts.items():
+            z.writestr(name, body)
+    return out.getvalue()
+
+
+def test_xlsx_metadata_loses_names_and_paths_but_nothing_else():
+    sheet = "<worksheet><sheetData><row><c><v>홍길동</v></c></row></sheetData></worksheet>"
+    src = _xlsx({"docProps/core.xml": CORE, "xl/workbook.xml": WORKBOOK, "xl/worksheets/sheet1.xml": sheet})
+    with zipfile.ZipFile(io.BytesIO(scrub_xlsx_metadata(src))) as z:
+        core, workbook = z.read("docProps/core.xml").decode(), z.read("xl/workbook.xml").decode()
+        assert "홍길동" not in core and "Hong" not in core and "2026-09-18" in core
+        assert "absPath" not in workbook and "Users" not in workbook and "<sheets/>" in workbook
+        assert z.read("xl/worksheets/sheet1.xml").decode() == sheet  # 데이터 시트는 그대로
+
+
+def test_the_committed_spreadsheets_carry_no_author_or_path():
+    raw = Path(__file__).resolve().parent.parent / "data" / "raw"
+    for path in raw.glob("*/*.xlsx"):
+        with zipfile.ZipFile(path) as z:
+            core = z.read("docProps/core.xml").decode()
+            assert "lastModifiedBy>" not in core and "creator>" not in core, path.name
+            assert "absPath" not in z.read("xl/workbook.xml").decode(), path.name
