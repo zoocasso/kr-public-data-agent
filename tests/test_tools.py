@@ -64,6 +64,9 @@ def test_agent_role_starts_read_only(agent_conn):
         "CREATE TABLE scratch (a int)",
         "CREATE TEMP TABLE scratch (a int)",
         "CREATE TEMP SEQUENCE scratch_seq",
+        "SELECT lo_from_bytea(0, 'x'::bytea)",  # large objects live outside any table
+        "SELECT lo_creat(-1)",
+        "SELECT lo_create(0)",
     ],
 )
 def test_agent_role_cannot_write_even_in_a_read_write_transaction(agent_conn, sql):

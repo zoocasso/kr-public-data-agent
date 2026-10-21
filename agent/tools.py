@@ -59,7 +59,8 @@ def tool_definitions(table_names: list[str]) -> list[dict]:
             "name": "run_sql",
             "description": (
                 f"PostgreSQL SELECT 쿼리 하나를 읽기 전용 계정으로 실행하고 결과를 최대 {MAX_ROWS}행까지 돌려준다. "
-                "list_tables 의 테이블만 읽을 수 있고, 함수는 집계·윈도·조건·숫자·문자열·날짜·형 변환 함수만 쓸 수 있다. "
+                "list_tables 의 테이블만 읽을 수 있고, 함수는 집계·윈도·조건·숫자·문자열·날짜·형 변환 함수만 쓸 수 있다 "
+                "(lpad·rpad 길이 1000 이하, replace 의 바꿀 문자열 100자 이하, 쿼리 4,000자 이하). "
                 "쓰기·DDL·여러 문장은 거부되고 5초가 넘으면 취소된다. 오류가 나면 메시지를 보고 고쳐서 다시 실행한다. "
                 "행이 많을 결과는 GROUP BY·집계로 줄여서 요청한다."
             ),

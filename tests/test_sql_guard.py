@@ -154,3 +154,67 @@ def test_a_cte_in_one_scope_does_not_cover_a_catalog_in_another(sql):
 )
 def test_ctes_still_work_where_postgres_sees_them(sql):
     check(sql)
+
+
+def test_a_long_query_is_rejected():
+    with pytest.raises(SqlRejected, match="너무 깁니다"):
+        check("SELECT 1" + " " * 4000 + ", 2")
+
+
+@pytest.mark.parametrize(
+    "sql, reason",
+    [
+        ("SELECT length(lpad('x', 250000000, 'y') || lpad('x', 250000000, 'y'))", "lpad·rpad 의 길이"),
+        ("SELECT rpad(title, 1001) FROM keit_projects", "lpad·rpad 의 길이"),
+        ("SELECT lpad(title, support_year * 100000) FROM keit_projects", "lpad·rpad 의 길이"),
+        ("SELECT replace(title, ' ', repeat('x', 1000)) FROM keit_projects", "바꿀 문자열"),
+        ("SELECT replace(title, ' ', title) FROM keit_projects", "바꿀 문자열"),
+        ("SELECT replace(title, ' ', '" + "x" * 101 + "') FROM keit_projects", "바꿀 문자열"),
+        ("SELECT regexp_replace(title, '', lead_org) FROM keit_projects", "바꿀 문자열"),
+        # each level multiplies the length: 1,000 x's become 10^5, 10^7, 10^9 characters
+        ("SELECT replace(replace(lpad('', 1000, 'x'), 'x', '" + "x" * 100 + "'), 'x', 'xx')", "안에 또"),
+        ("SELECT lpad(replace(title, 'a', 'aaaa'), 10) FROM keit_projects", "안에 또"),
+        ("SELECT regexp_replace(regexp_replace(title, '', 'ab', 'g'), '', 'ab', 'g') FROM keit_projects", "안에 또"),
+    ],
+)
+def test_string_growth_is_bounded(sql, reason):
+    with pytest.raises(SqlRejected, match=reason):
+        check(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT lpad(lead_org_code, 10, '0'), rpad(title, 20) FROM keit_projects",
+        "SELECT replace(replace(org_name, '(주)', ''), ' ', '') FROM ketep_project_orgs",  # shrinking replaces may nest
+        "SELECT replace(org_name, '(주)', '주식회사') FROM ketep_project_orgs",
+        "SELECT regexp_replace(regexp_replace(org_name, '\\s+', '', 'g'), '[()]', '', 'g') FROM ketep_project_orgs",
+    ],
+)
+def test_ordinary_string_cleaning_still_passes(sql):
+    check(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT 'pg_authid'::regclass",
+        "SELECT CAST('app' AS regrole)",
+        "SELECT 'pg_read_file(text)'::regprocedure",
+        "SELECT regclass 'pg_authid'",
+        "SELECT 'x'::pg_catalog.regclass",
+        "SELECT 'int4'::regtype, 'public'::regnamespace",
+        "SELECT '1'::oid",
+        "SELECT '<a/>'::xml",
+    ],
+)
+def test_casts_outside_the_allowlist_are_rejected(sql):
+    with pytest.raises(SqlRejected, match="형 변환"):
+        check(sql)
+
+
+def test_ordinary_casts_still_pass():
+    check(
+        "SELECT support_year::text, start_date::timestamp, '1 day'::interval, avg(support_year)::numeric(10, 2), "
+        "date '2024-01-01', CAST(project_no AS bigint), ARRAY[1, 2]::int[] FROM keit_projects GROUP BY 1, 2"
+    )

@@ -118,6 +118,35 @@ ALLOWED_FUNCTION_TYPES: frozenset[type[exp.Func]] = frozenset(
 # sqlglot 이 모르는 함수(exp.Anonymous)는 PostgreSQL 이름으로 확인한다
 ALLOWED_FUNCTION_NAMES = frozenset({"age", "make_date", "every", "regexp_match", "cardinality", "octet_length"})
 
+# CAST·:: 로 바꿀 수 있는 타입. regclass·regrole·regprocedure 같은 reg* 타입은 이름으로 카탈로그를 조회하고
+# (없는 이름이면 오류가 나서 역할 이름을 알아내는 데 쓸 수 있다), 그 밖의 타입은 분석에 필요 없다.
+_T = exp.DataType.Type
+ALLOWED_CAST_TYPES = frozenset(
+    {
+        _T.SMALLINT,
+        _T.INT,
+        _T.BIGINT,
+        _T.DECIMAL,
+        _T.DOUBLE,
+        _T.FLOAT,
+        _T.TEXT,
+        _T.VARCHAR,
+        _T.CHAR,
+        _T.BOOLEAN,
+        _T.DATE,
+        _T.TIME,
+        _T.TIMESTAMP,
+        _T.TIMESTAMPTZ,
+        _T.INTERVAL,
+    }
+)
+
+# 문자열을 키우는 함수의 상한. lpad('x', 250000000) 세 개를 이으면 한 쿼리가 DB 메모리를 수 GB 쓰고,
+# 문자열을 만드는 동안은 취소를 확인하지 않아 statement_timeout(5초)도 넘긴다.
+MAX_SQL_CHARS = 4000
+MAX_PAD_LENGTH = 1000
+MAX_REPLACEMENT_CHARS = 100
+
 _WRITE_NODES = tuple(
     t
     for t in (
@@ -213,9 +242,51 @@ def _check_table(node: exp.Table, tables: set[str]) -> None:
     )
 
 
+def _check_cast(node: exp.Cast) -> None:
+    to = node.to
+    targets = list(to.expressions) if to.this == _T.ARRAY else [to]
+    if all(isinstance(t, exp.DataType) and t.this in ALLOWED_CAST_TYPES for t in targets):
+        return
+    target = to.sql(dialect="postgres").lower()
+    raise SqlRejected(f"허용되지 않는 형 변환입니다: {target}. 숫자·문자·날짜·시간·불리언 타입으로만 바꿀 수 있습니다.")
+
+
+def _grows(node: exp.Expression) -> bool:
+    """결과가 입력보다 길어질 수 있는 문자열 함수 호출인가."""
+    if isinstance(node, exp.Pad):
+        return True
+    if isinstance(node, exp.Replace):
+        pattern, replacement = node.args.get("expression"), node.args.get("replacement")
+        literals = isinstance(pattern, exp.Literal) and isinstance(replacement, exp.Literal)
+        return not (literals and len(replacement.name) <= len(pattern.name))
+    if isinstance(node, exp.RegexpReplace):
+        # 정규식은 빈 문자열에도 맞을 수 있어서, 빈 문자열로 바꾸는 게 아니면 길어질 수 있다고 본다
+        replacement = node.args.get("replacement")
+        return not (isinstance(replacement, exp.Literal) and replacement.name == "")
+    return False
+
+
+def _check_growth(node: exp.Expression) -> None:
+    """문자열을 키우는 함수의 길이 인자를 상수 상한 안으로 묶고, 그런 함수끼리 겹치지 못하게 한다."""
+    if isinstance(node, exp.Pad):
+        length = node.args.get("expression")
+        if not (isinstance(length, exp.Literal) and length.is_int and int(length.name) <= MAX_PAD_LENGTH):
+            raise SqlRejected(f"lpad·rpad 의 길이는 {MAX_PAD_LENGTH} 이하의 정수 상수여야 합니다.")
+    elif isinstance(node, (exp.Replace, exp.RegexpReplace)):
+        replacement = node.args.get("replacement")
+        if not (
+            isinstance(replacement, exp.Literal) and replacement.is_string and len(replacement.name) <= MAX_REPLACEMENT_CHARS
+        ):
+            raise SqlRejected(f"replace·regexp_replace 의 바꿀 문자열은 {MAX_REPLACEMENT_CHARS}자 이하의 문자열 상수여야 합니다.")
+    if _grows(node) and any(_grows(inner) for inner in node.this.walk()):
+        raise SqlRejected("문자열을 늘리는 함수(lpad·rpad·replace·regexp_replace) 안에 또 그런 함수를 넣을 수 없습니다.")
+
+
 def check_select(sql: str, tables: Iterable[str]) -> str:
     """검사를 통과하면 끝의 세미콜론만 뗀 원문을 돌려준다. tables: 읽어도 되는 public 테이블."""
     text = sql.strip().rstrip(";").strip()
+    if len(text) > MAX_SQL_CHARS:
+        raise SqlRejected(f"쿼리가 너무 깁니다 ({len(text):,}자). {MAX_SQL_CHARS:,}자 이하로 줄여 주세요.")
     if not text:
         raise SqlRejected("빈 쿼리입니다.")
     try:
@@ -233,6 +304,10 @@ def check_select(sql: str, tables: Iterable[str]) -> str:
     for node in root.walk():
         if isinstance(node, _WRITE_NODES):
             raise SqlRejected(f"읽기 전용입니다. 허용되지 않는 구문: {node.key.upper()}")
+        if isinstance(node, exp.Cast):
+            _check_cast(node)
+        if isinstance(node, (exp.Pad, exp.Replace, exp.RegexpReplace)):
+            _check_growth(node)
         if isinstance(node, exp.Func):
             _check_function(node)
         elif isinstance(node, exp.Table):

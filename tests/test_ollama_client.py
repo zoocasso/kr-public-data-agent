@@ -53,3 +53,27 @@ def test_routing_and_zero_cost():
         )
     )
     assert u.cost_usd == 0.0
+
+
+def _response(model, input_tokens, output_tokens, cache_write=0, cache_read=0):
+    usage = NS(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_creation_input_tokens=cache_write,
+        cache_read_input_tokens=cache_read,
+    )
+    return NS(usage=usage, model=model)
+
+
+def test_haiku_prompts_over_100k_tokens_use_the_long_prompt_price():
+    u = llm.Usage("claude-haiku-5-5")
+    u.add(_response("claude-haiku-5-5", 50_000, 1_000))  # 0.10 / 0.50
+    assert round(u.cost_usd, 6) == round((50_000 * 0.10 + 1_000 * 0.50) / 1e6, 6)
+    u.add(_response("claude-haiku-5-5", 20_000, 1_000, cache_read=90_000))  # 110K prompt: 0.50 / 2.50, read 0.05
+    long_call = (20_000 * 0.50 + 1_000 * 2.50 + 90_000 * 0.05) / 1e6
+    assert round(u.cost_usd, 6) == round((50_000 * 0.10 + 1_000 * 0.50) / 1e6 + long_call, 6)
+    # the tier is per call: Opus has a single rate card
+    o = llm.Usage("claude-opus-5-5")
+    o.add(_response("claude-opus-5-5", 200_000, 1_000))
+    assert round(o.cost_usd, 6) == round((200_000 * 4.00 + 1_000 * 20.00) / 1e6, 6)
+    assert llm.Usage("some-unknown-model").cost_usd is None

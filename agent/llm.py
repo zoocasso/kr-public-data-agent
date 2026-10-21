@@ -18,6 +18,24 @@ PRICES = {
     "claude-sonnet-5-5": (2.00, 10.00, 2.50, 0.20),
     "claude-haiku-5-5": (0.10, 0.50, 0.125, 0.01),
 }
+# 프롬프트(입력 + 캐시 쓰기 + 캐시 읽기)가 이 토큰 수를 넘는 호출은 다른 가격표를 쓴다.
+# Haiku 5.5 는 100K 토큰을 넘으면 입력·출력 단가가 5배 (캐시 쓰기 1.25배, 읽기 0.1배 비율은 같음).
+LONG_PROMPT_PRICES = {
+    "claude-haiku-5-5": (100_000, (0.50, 2.50, 0.625, 0.05)),
+}
+
+
+def call_cost(model: str, input_tokens: int, output_tokens: int, cache_write: int, cache_read: int) -> float | None:
+    """API 호출 한 번의 비용(USD). 가격표에 없는 모델이면 None."""
+    price = PRICES.get(model)
+    if price is None:
+        return None
+    long_prompt = LONG_PROMPT_PRICES.get(model)
+    if long_prompt and input_tokens + cache_write + cache_read > long_prompt[0]:
+        price = long_prompt[1]
+    p_in, p_out, p_cw, p_cr = price
+    return (input_tokens * p_in + output_tokens * p_out + cache_write * p_cw + cache_read * p_cr) / 1_000_000
+
 
 # 안전 분류기가 요청을 거절하면 서버에서 다른 모델로 다시 돌린다. Haiku 는 지원하지 않음.
 FALLBACK_MODELS = {"claude-opus-5-5", "claude-sonnet-5-5"}
@@ -62,27 +80,37 @@ class Usage:
     cache_write_tokens: int = 0
     cache_read_tokens: int = 0
     served_by: set[str] = field(default_factory=set)
+    # 가격표가 프롬프트 길이에 따라 달라서 합계가 아니라 호출마다 계산해 더한다
+    priced_cost: float = 0.0
+    unpriced_calls: int = 0
 
     def add(self, response) -> None:
         u = response.usage
+        tokens = (
+            u.input_tokens or 0,
+            u.output_tokens or 0,
+            u.cache_creation_input_tokens or 0,
+            u.cache_read_input_tokens or 0,
+        )
         self.calls += 1
-        self.input_tokens += u.input_tokens or 0
-        self.output_tokens += u.output_tokens or 0
-        self.cache_write_tokens += u.cache_creation_input_tokens or 0
-        self.cache_read_tokens += u.cache_read_input_tokens or 0
+        self.input_tokens += tokens[0]
+        self.output_tokens += tokens[1]
+        self.cache_write_tokens += tokens[2]
+        self.cache_read_tokens += tokens[3]
         self.served_by.add(response.model)
+        cost = call_cost(self.model, *tokens)
+        if cost is None:
+            self.unpriced_calls += 1
+        else:
+            self.priced_cost += cost
 
     @property
     def cost_usd(self) -> float | None:
         if is_ollama(self.model):
             return 0.0  # 로컬 실행: API 비용 없음
-        price = PRICES.get(self.model)
-        if price is None:
+        if self.model not in PRICES or self.unpriced_calls:
             return None
-        p_in, p_out, p_cw, p_cr = price
-        return (
-            self.input_tokens * p_in + self.output_tokens * p_out + self.cache_write_tokens * p_cw + self.cache_read_tokens * p_cr
-        ) / 1_000_000
+        return self.priced_cost
 
     def as_dict(self) -> dict:
         return {

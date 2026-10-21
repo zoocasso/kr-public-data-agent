@@ -10,6 +10,9 @@ CREATE ROLE agent_ro LOGIN PASSWORD :'agent_pw';
 GRANT CONNECT ON DATABASE :"DBNAME" TO agent_ro;
 -- PUBLIC 은 기본으로 임시 테이블을 만들 수 있다. 읽기·쓰기 트랜잭션으로 바꾼 agent_ro 가 쓸 곳이 없게 회수한다.
 REVOKE TEMPORARY ON DATABASE :"DBNAME" FROM PUBLIC;
+-- 대용량 객체(large object)는 테이블 권한과 상관없이 PUBLIC 이 만들고 쓸 수 있다. 이것도 회수한다.
+REVOKE EXECUTE ON FUNCTION lo_creat(integer), lo_create(oid), lo_from_bytea(oid, bytea), lo_import(text),
+    lo_import(text, oid), lo_put(oid, bigint, bytea), lo_unlink(oid) FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO agent_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO agent_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO agent_ro;
