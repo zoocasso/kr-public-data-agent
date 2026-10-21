@@ -92,7 +92,9 @@ def tool_definitions(table_names: list[str]) -> list[dict]:
             "name": "submit_answer",
             "description": (
                 "최종 답을 제출한다. 답을 정했으면 반드시 이 도구로 끝낸다. "
-                "evidence_sql 은 이번 대화에서 run_sql 로 실제 실행해 성공한 쿼리를 그대로 넣는다."
+                "evidence_sql 은 이번 대화에서 run_sql 로 실제 실행해 성공한 쿼리를 그대로 넣는다. "
+                "거절이 아니면 evidence_sql 이나 sources(search_docs 로 찾은 문서) 중 하나는 있어야 하고, "
+                "실행하지 않은 쿼리나 찾지 않은 문서를 넣으면 제출이 거부된다."
             ),
             "strict": True,
             "input_schema": {

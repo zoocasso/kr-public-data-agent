@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import psycopg
@@ -25,9 +24,3 @@ def toolbox(db):
     from agent.tools import Toolbox
 
     return Toolbox(db)
-
-
-@pytest.fixture
-def needs_api_key():
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        pytest.skip("ANTHROPIC_API_KEY 없음")

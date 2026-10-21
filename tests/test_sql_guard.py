@@ -121,3 +121,36 @@ def test_a_cte_name_does_not_open_a_schema():
     # an unqualified name may be a CTE, a qualified one never is
     with pytest.raises(SqlRejected, match="pg_catalog.pg_roles"):
         check("WITH pg_roles AS (SELECT 1) SELECT * FROM pg_catalog.pg_roles")
+
+
+# a CTE named like a catalog only covers references inside the query that declares it
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "SELECT rolname FROM pg_roles WHERE EXISTS (WITH pg_roles AS (SELECT 1 AS x) SELECT x FROM pg_roles)",
+        "SELECT (WITH pg_roles AS (SELECT 1) SELECT 1), rolname FROM pg_roles",
+        "SELECT (SELECT count(*) FROM pg_roles), (WITH pg_roles AS (SELECT 1 AS x) SELECT x FROM pg_roles)",
+        "SELECT rolname::text FROM pg_roles UNION ALL (WITH pg_roles AS (SELECT 'x' AS rolname) SELECT rolname FROM pg_roles)",
+        "SELECT * FROM (WITH pg_roles AS (SELECT 1 AS x) SELECT * FROM pg_roles) s, pg_roles",
+        # without RECURSIVE a CTE does not see the ones after it
+        "WITH a AS (SELECT rolname FROM pg_roles), pg_roles AS (SELECT 1) SELECT * FROM a",
+    ],
+)
+def test_a_cte_in_one_scope_does_not_cover_a_catalog_in_another(sql):
+    with pytest.raises(SqlRejected, match="조회할 수 없는 테이블"):
+        check(sql)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "WITH a AS (SELECT 1 AS x), b AS (SELECT x FROM a) SELECT * FROM b",
+        "WITH RECURSIVE n AS (SELECT 1 AS i UNION ALL SELECT i + 1 FROM n WHERE i < 3) SELECT * FROM n",
+        "WITH t AS (SELECT 1 AS x) SELECT * FROM t UNION ALL SELECT * FROM t",
+        "WITH t AS (SELECT 1 AS x) SELECT * FROM keit_projects WHERE EXISTS (SELECT 1 FROM t)",
+        "SELECT * FROM (WITH t AS (SELECT 1 AS x) SELECT * FROM t) s",
+        "WITH o AS (SELECT 1 AS x) SELECT (WITH i AS (SELECT x FROM o) SELECT x FROM i)",
+    ],
+)
+def test_ctes_still_work_where_postgres_sees_them(sql):
+    check(sql)

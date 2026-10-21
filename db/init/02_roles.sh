@@ -8,6 +8,8 @@ psql -v ON_ERROR_STOP=1 \
      -v agent_pw="${AGENT_DB_PASSWORD:?AGENT_DB_PASSWORD is required}" <<'SQL'
 CREATE ROLE agent_ro LOGIN PASSWORD :'agent_pw';
 GRANT CONNECT ON DATABASE :"DBNAME" TO agent_ro;
+-- PUBLIC 은 기본으로 임시 테이블을 만들 수 있다. 읽기·쓰기 트랜잭션으로 바꾼 agent_ro 가 쓸 곳이 없게 회수한다.
+REVOKE TEMPORARY ON DATABASE :"DBNAME" FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO agent_ro;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO agent_ro;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO agent_ro;

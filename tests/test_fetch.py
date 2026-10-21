@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.fetch_data import drop_csv_columns
+from scripts.fetch_data import check_drop_columns, drop_csv_columns
 
 
 def test_drops_the_name_column_and_keeps_encoding_and_line_endings():
@@ -20,3 +20,11 @@ def test_keeps_quoting_for_fields_with_commas_and_a_utf8_bom():
 def test_a_missing_column_is_an_error():
     with pytest.raises(ValueError):
         drop_csv_columns(b"a,b\n1,2\n", ["c"])
+
+
+def test_drop_columns_on_a_non_csv_file_stops_before_anything_is_written():
+    ds = {"key": "kimst", "drop_columns": ["연구책임자"]}
+    assert check_drop_columns(ds, ["data.csv", "portal_description.md"]) == ["연구책임자"]
+    with pytest.raises(ValueError, match="CSV 가 아닌 파일"):
+        check_drop_columns(ds, ["data.xlsx", "portal_description.md"])
+    assert check_drop_columns({"key": "keit"}, ["data.xlsx"]) == []

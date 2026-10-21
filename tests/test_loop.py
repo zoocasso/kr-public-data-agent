@@ -70,14 +70,69 @@ def test_nudges_once_when_model_answers_in_plain_text(toolbox):
     assert client.requests[1]["messages"][-1] == {"role": "user", "content": "submit_answer 도구로 최종 답을 제출해 주세요."}
 
 
-def test_flags_evidence_that_was_never_run(toolbox):
+def submit(id_, evidence_sql="", values=("1569",), sources=(), refused=False):
+    return tool(
+        id_,
+        "submit_answer",
+        answer="1,569건",
+        values=list(values),
+        evidence_sql=evidence_sql,
+        sources=list(sources),
+        refused=refused,
+    )
+
+
+def test_evidence_that_was_never_run_is_sent_back(toolbox):
     client = FakeClient(
         [
-            response(
-                tool("t1", "submit_answer", answer="1569", values=["1569"], evidence_sql=GOOD_SQL, sources=[], refused=False)
-            ),
+            response(submit("t1", evidence_sql=GOOD_SQL)),  # 실행한 적 없는 쿼리
+            response(tool("t2", "run_sql", sql=GOOD_SQL, purpose="근거")),
+            response(submit("t3", evidence_sql=GOOD_SQL)),
         ]
     )
     r = run_agent("q", toolbox, client=client, model="claude-haiku-5-5", effort="low")
-    assert r.evidence_check["executed_in_run"] is False and r.evidence_check["runs"] is True
+    assert r.status == "answered" and r.evidence_check["executed_in_run"] is True
+    assert [(t["tool"], t["ok"]) for t in r.trace] == [("submit_answer", False), ("run_sql", True)]
+    rejected = client.requests[1]["messages"][-1]["content"][0]
+    assert rejected["is_error"] is True and "run_sql 로 실행해 성공한 쿼리" in rejected["content"]
     assert "fallbacks" not in client.requests[0]  # Haiku 는 서버 폴백 미지원
+
+
+def test_an_answer_with_no_evidence_is_sent_back(toolbox):
+    client = FakeClient([response(submit("t1")), response(submit("t2", refused=True, values=()))])
+    r = run_agent("q", toolbox, client=client, model="claude-opus-5-5", effort="low")
+    assert r.status == "refused"
+    assert "근거가 없습니다" in client.requests[1]["messages"][-1]["content"][0]["content"]
+
+
+def test_a_query_run_in_the_same_turn_counts_as_evidence(toolbox):
+    client = FakeClient([response(tool("t1", "run_sql", sql=GOOD_SQL, purpose="근거"), submit("t2", evidence_sql=GOOD_SQL))])
+    r = run_agent("q", toolbox, client=client, model="claude-opus-5-5", effort="low")
+    assert r.status == "answered" and r.evidence_check["executed_in_run"] is True
+
+
+def test_a_different_string_literal_is_a_different_query(toolbox):
+    ran = "SELECT count(*) FROM keit_projects WHERE ministry = '소방청'"
+    client = FakeClient(
+        [
+            response(tool("t1", "run_sql", sql=ran.lower(), purpose="키워드만 소문자")),
+            response(submit("t2", evidence_sql=ran, values=("58",))),  # 키워드 대소문자·공백 차이는 같은 쿼리
+            response(tool("t3", "run_sql", sql="SELECT 'ABC'", purpose="값")),
+            response(submit("t4", evidence_sql="SELECT 'abc'", values=("58",))),
+        ]
+    )
+    r = run_agent("q", toolbox, client=client, model="claude-opus-5-5", effort="low")
+    assert r.status == "answered" and len(r.trace) == 1
+
+
+def test_a_document_answer_must_cite_a_document_it_found(toolbox):
+    client = FakeClient(
+        [
+            response(submit("t1", values=(), sources=["data/raw/kimst/portal_description.md"])),  # 찾지 않은 문서
+            response(tool("t2", "search_docs", query="해양수산 연구비 데이터 2023년까지만 있는 이유 IRIS")),
+            response(submit("t3", values=(), sources=["data/raw/kimst/portal_description.md"])),
+        ]
+    )
+    r = run_agent("q", toolbox, client=client, model="claude-opus-5-5", effort="low")
+    assert r.status == "answered" and r.sources == ["data/raw/kimst/portal_description.md"]
+    assert [(t["tool"], t["ok"]) for t in r.trace] == [("submit_answer", False), ("search_docs", True)]

@@ -17,6 +17,7 @@ import re
 _UNITS = {"조": 10**12, "억": 10**8, "만": 10**4}
 _YEAR = re.compile(r"\d{4}\s*(?:[~\-–]\s*\d{4}\s*)?년")
 _PLAIN_NUMBER = re.compile(r"-?\d+(?:\.(\d+))?")
+_YEAR_VALUE = re.compile(r"(?<![\d,.])((?:19|20)\d{2})(?![\d,.])")
 _NUM = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 _KOR_AMOUNT = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*(조|억|만)")
 
@@ -52,10 +53,17 @@ def norm_name(s: str) -> str:
     return re.sub(r"\s+", "", str(s)).lower()
 
 
-def _numbers(values: list[str], answer: str) -> list[float]:
-    """values 의 숫자. values 에 숫자가 하나도 없으면 answer 문장의 숫자 (연도 표기는 뺀다)."""
+def _numbers(values: list[str], answer: str, year: bool = False) -> list[float]:
+    """values 의 숫자. values 에 숫자가 하나도 없으면 answer 문장의 숫자를 쓴다.
+
+    문장에서는 보통 연도 표기('2024년')를 빼지만, 답이 연도인 문항(unit: year)은 거꾸로 연도만 본다.
+    """
     found = [v for v in (parse_number(x) for x in values) if v is not None]
-    return found or numbers_in(_YEAR.sub(" ", answer))
+    if found:
+        return found
+    if year:
+        return [float(y) for y in _YEAR_VALUE.findall(answer)]
+    return numbers_in(_YEAR.sub(" ", answer))
 
 
 def _fmt(nums: list[float]) -> str:
@@ -92,7 +100,7 @@ def grade(q: dict, gold, pred: dict) -> tuple[bool, str]:
         return True, "필수 내용 포함"
 
     tol = float(q.get("tolerance", 0))
-    cands = _numbers(values, answer)
+    cands = _numbers(values, answer, year=q.get("unit") == "year")
     if t == "number":
         if not cands:
             return False, "숫자 없음"

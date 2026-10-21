@@ -123,3 +123,16 @@ def test_evidence_must_show_the_submitted_values():
     names = {"executed_in_run": True, "runs": True, "result": [["자동차/철도차량", "1200"], ["반도체소자및시스템", "900"]]}
     assert evidence_supports({"values": ["자동차/철도차량", "반도체소자및시스템"], "evidence_check": names})
     assert not evidence_supports({"values": ["자동차/철도차량", "제조융합서비스"], "evidence_check": names})
+
+
+@pytest.mark.parametrize(
+    "answer, ok",
+    [
+        ("2024년입니다.", True),
+        ("2024년이 1,569건으로 가장 많았습니다.", True),  # 연도 문항에서는 건수가 아니라 연도를 본다
+        ("2020년입니다.", False),
+        ("2024년과 2020년이 많았습니다.", False),
+    ],
+)
+def test_a_year_answer_is_read_from_the_sentence(answer, ok):
+    assert grade(BY_ID["r22"], GOLD["r22"], {"refused": False, "values": [], "answer": answer})[0] is ok

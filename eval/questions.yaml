@@ -2,6 +2,7 @@
 #
 # answer_type
 #   number        gold_sql 결과의 첫 칸 하나. tolerance 는 상대오차 (0 이면 정확히 일치)
+#                 unit: year 면 답이 연도: 답 문장에서는 연도 표기만 숫자로 본다
 #   numbers       gold_sql 결과 첫 행의 여러 숫자, 순서대로
 #   ordered_list  gold_sql 결과 첫 칼럼, 순서까지 일치
 #   set           gold_sql 결과 첫 칼럼, 순서 무관 (동점 등)
@@ -176,6 +177,7 @@ questions:
     category: topk
     question: KEIT 과제가 가장 많았던 지원년도는?
     answer_type: number
+    unit: year
     gold_sql: |
       SELECT support_year FROM keit_projects
       GROUP BY support_year ORDER BY count(*) DESC LIMIT 1
@@ -200,6 +202,7 @@ questions:
     category: topk
     question: KEIT 세부분야가 '반도체장비'인 과제가 가장 많았던 해는 언제야?
     answer_type: number
+    unit: year
     gold_sql: |
       SELECT support_year FROM keit_projects WHERE field_detail = '반도체장비'
       GROUP BY support_year ORDER BY count(*) DESC LIMIT 1

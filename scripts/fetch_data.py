@@ -90,6 +90,16 @@ def drop_csv_columns(data: bytes, columns: list[str]) -> bytes:
     return out.getvalue().encode(enc)
 
 
+def check_drop_columns(ds: dict, filenames: list[str]) -> list[str]:
+    """지울 칼럼 목록. drop_csv_columns 는 CSV 만 다루므로, 다른 형식의 데이터 파일이 섞여 있으면
+    지우지 못한 채 저장하지 않도록 아무것도 쓰기 전에 멈춘다 (.md 는 설명 문서)."""
+    drop = ds.get("drop_columns") or []
+    not_csv = [f for f in filenames if not f.lower().endswith((".csv", ".md"))]
+    if drop and not_csv:
+        raise ValueError(f"{ds['key']}: drop_columns 는 CSV 에만 쓸 수 있는데 CSV 가 아닌 파일이 있습니다: {not_csv}")
+    return drop
+
+
 def fetch(ds: dict) -> list[dict]:
     page, _ = _get(ds["page"])
     page_html = page.decode("utf-8", "ignore")
@@ -114,6 +124,7 @@ def fetch(ds: dict) -> list[dict]:
         files[name] = body
     files["portal_description.md"] = _portal_description(page_html, ds).encode()
 
+    drop = check_drop_columns(ds, list(files))
     records = []
     for fname, data in files.items():
         record = {
@@ -122,7 +133,6 @@ def fetch(ds: dict) -> list[dict]:
             "atch_file_id": file_id,
             "file": f"{ds['key']}/{fname}",
         }
-        drop = ds.get("drop_columns") or []
         if drop and fname.lower().endswith(".csv"):
             record["source_sha256"] = hashlib.sha256(data).hexdigest()
             record["dropped_columns"] = drop

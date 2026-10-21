@@ -13,7 +13,9 @@ services:
       - dbdata:/var/lib/postgresql/data
       - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d publicdata"]
+      # over TCP: during first-run init the server listens on the socket only, so a socket check would
+      # report healthy before db/init/*.sql and 02_roles.sh have finished
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U app -d publicdata"]
       interval: 2s
       timeout: 3s
       retries: 30

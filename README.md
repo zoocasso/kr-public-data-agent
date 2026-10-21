@@ -4,7 +4,7 @@
 
 공공 R&D 공개 데이터에 자연어로 질문하면, 에이전트가 스키마를 찾아 SQL을 만들고 실행·검증한 뒤 **근거 쿼리와 함께** 답하는 도구.
 
-A natural-language query agent over Korean public R&D open data (procurement data is planned, not loaded yet). Every number in an answer comes with the SQL that produced it.
+A natural-language query agent over Korean public R&D open data (procurement data is planned, not loaded yet). Every answer cites the query or document it rests on: the agent cannot submit a query it has not run, and the eval checks that the query's result holds the submitted values.
 
 > 진행 중 (2026-10). MVP 목표 2026-11 중순, 평가표·docker compose 배포 2026-12.
 
@@ -48,8 +48,8 @@ scripts/
 
 ### 설계 메모
 
-- **허용 목록 검사 + 읽기 전용 계정.** `run_sql` 은 sqlglot 으로 단일 SELECT 인지, 쓰는 함수가 허용 목록(집계·윈도·조건·숫자·문자열·날짜·형 변환)에 있는지, 읽는 테이블이 공개 데이터 테이블(또는 쿼리 안의 CTE)인지 확인한다. 그래서 `query_to_xml('select pg_sleep(4)', …)`, `pg_notify`, advisory lock, `current_setting`, `pg_roles` 같은 시스템 카탈로그는 실행 전에 거절된다. DB 쪽 `agent_ro` 계정은 SELECT 권한만 있어서 트랜잭션을 읽기·쓰기로 바꿔도 쓰지 못하고(테스트로 확인), `default_transaction_read_only=on`, `statement_timeout=5s` 가 걸린다. 다만 권한만으로는 `pg_notify` 나 advisory lock 같은 부작용 함수를 막지 못하므로 함수 허용 목록이 그 몫을 맡는다.
-- **근거 쿼리 = 실제 실행된 쿼리.** SQL 을 고쳐 쓰지 않고 원문 그대로 실행하고, 행 수 제한은 커서에서 건다. 답을 제출하면 근거 쿼리가 이번 실행에서 성공했던 쿼리인지 확인하고 다시 실행해 결과(앞 50행)를 붙인다. 채점에서는 정답 여부와 따로, 그 결과에 제출한 값이 모두 들어 있는지를 보고 결과 표에 "근거 쿼리 결과로 값이 확인된 정답" 비율을 낸다.
+- **허용 목록 검사 + 읽기 전용 계정.** `run_sql` 은 sqlglot 으로 단일 SELECT 인지, 쓰는 함수가 허용 목록(집계·윈도·조건·숫자·문자열·날짜·형 변환)에 있는지, 읽는 테이블이 공개 데이터 테이블이거나 그 자리에서 보이는 CTE 인지 확인한다(다른 범위에 같은 이름의 CTE 를 선언해도 통과하지 못한다). 그래서 `query_to_xml('select pg_sleep(4)', …)`, `pg_notify`, advisory lock, `current_setting`, `pg_roles` 같은 시스템 카탈로그는 실행 전에 거절된다. DB 쪽 `agent_ro` 계정은 SELECT 권한만 있고 임시 테이블 권한도 회수해서, 트랜잭션을 읽기·쓰기로 바꿔도 테이블·임시 객체 어디에도 쓰지 못하며(테스트로 확인), `default_transaction_read_only=on`, `statement_timeout=5s` 가 걸린다. 다만 권한만으로는 `pg_notify` 나 advisory lock 같은 부작용 함수를 막지 못하므로 함수 허용 목록이 그 몫을 맡는다.
+- **근거 쿼리 = 실제 실행된 쿼리.** SQL 을 고쳐 쓰지 않고 원문 그대로 실행하고, 행 수 제한은 커서에서 건다. 답은 근거가 있어야 받는다: 이번 실행에서 run_sql 로 성공한 쿼리(evidence_sql)나 search_docs 로 찾은 문서(sources)가 없으면 제출을 도구 오류로 돌려보내 다시 내게 한다. 받은 답의 근거 쿼리는 다시 실행해 결과(앞 50행)를 붙인다. 채점에서는 정답 여부와 따로, 그 결과에 제출한 값이 모두 들어 있는지를 보고 결과 표에 "근거 쿼리 결과로 값이 확인된 정답" 비율을 낸다.
 - **오류도 기록으로 남긴다.** DB 오류(시간 초과 포함)는 모델에게 도구 오류로 돌려줘서 고쳐 쓰게 한다. API·Ollama 호출이나 하네스가 실패하면 예외 대신 그때까지의 도구 호출 기록과 토큰 사용량을 담아 `api_error`·`harness_error` 로 끝난다. 사용량을 알 수 없는 문항의 비용은 0 으로 세지 않고 따로 표시한다.
 - **스키마는 DB 주석에서.** 칼럼 이름은 영문, 원본 항목명과 의미는 `COMMENT` 로 저장. `describe_table` 은 주석과 함께 값 분포(고유값이 적은 칼럼은 전체 값과 건수)를 보여 줘서 모델이 `'미분류'` 같은 표기를 추측하지 않고 확인하게 한다.
 - **최종 답은 도구로 제출.** `submit_answer(answer, values, evidence_sql, sources, refused)` 로 끝나서 채점과 화면 표시가 같은 구조를 쓴다.
@@ -74,7 +74,7 @@ scripts/
 - `oneshot_sql` — 스키마를 프롬프트로 주고 SQL 한 번 생성·실행, 수정 루프 없음
 - `agent` — 이 프로젝트
 
-채점 ([eval/grade.py](eval/grade.py)): 숫자는 상대오차(개수는 정확히, 금액 1%)로 보되 제출한 숫자가 모두 맞아야 하고(여러 개를 내고 하나만 맞으면 오답), 여러 숫자는 개수와 순서까지, 순위는 순서까지, 동점은 집합으로 본다. 거절 문항은 거절해야 정답, 답할 수 있는 문항을 거절하면 오답. 문서 질문은 필수 표현이 모두 있고 틀린 주장 표현이 없어야 정답이다 (공백 무시, 문장의 뜻까지 판정하지는 않는다). 결과는 `eval/results/` 에 쌓이고 git 에는 올리지 않는다. 첫 전체 실행은 2026-11 예정이라 아직 결과 표는 없다.
+채점 ([eval/grade.py](eval/grade.py)): 숫자는 상대오차(개수는 정확히, 금액 1%)로 보되 제출한 숫자가 모두 맞아야 하고(여러 개를 내고 하나만 맞으면 오답), 여러 숫자는 개수와 순서까지, 순위는 순서까지, 동점은 집합으로 본다. 답이 연도인 문항은 답 문장에서 연도만 숫자로 본다. 거절 문항은 거절해야 정답, 답할 수 있는 문항을 거절하면 오답. 문서 질문은 필수 표현이 모두 있고 틀린 주장 표현이 없어야 정답이다 (공백 무시, 문장의 뜻까지 판정하지는 않는다). 결과는 `eval/results/` 에 쌓이고 git 에는 올리지 않는다. 첫 전체 실행은 2026-11 예정이라 아직 결과 표는 없다.
 
 ## 실행
 

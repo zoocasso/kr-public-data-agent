@@ -62,6 +62,8 @@ def test_agent_role_starts_read_only(agent_conn):
         "INSERT INTO keit_project_participants VALUES (0, 'x')",
         "TRUNCATE kimst_project_budgets",
         "CREATE TABLE scratch (a int)",
+        "CREATE TEMP TABLE scratch (a int)",
+        "CREATE TEMP SEQUENCE scratch_seq",
     ],
 )
 def test_agent_role_cannot_write_even_in_a_read_write_transaction(agent_conn, sql):
